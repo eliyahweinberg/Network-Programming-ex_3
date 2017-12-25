@@ -54,11 +54,6 @@ typedef int (*dispatch_fn)(void *);
  * create_threadpool creates a fixed-sized thread
  * pool.  If the function succeeds, it returns a (non-NULL)
  * "threadpool", else it returns NULL.
- * this function should:
- * 1. input sanity check
- * 2. initialize the threadpool structure
- * 3. initialized mutex and conditional variables
- * 4. create the threads, the thread init function is do_work and its argument is the initialized threadpool.
  */
 threadpool* create_threadpool(int num_threads_in_pool);
 
@@ -67,24 +62,11 @@ threadpool* create_threadpool(int num_threads_in_pool);
  * dispatch enter a "job" of type work_t into the queue.
  * when an available thread takes a job from the queue, it will
  * call the function "dispatch_to_here" with argument "arg".
- * this function should:
- * 1. create and init work_t element
- * 2. lock the mutex
- * 3. add the work_t element to the queue
- * 4. unlock mutex
- *
  */
 void dispatch(threadpool* from_me, dispatch_fn dispatch_to_here, void *arg);
 
 /**
  * The work function of the thread
- * this function should:
- * 1. lock mutex
- * 2. if the queue is empty, wait
- * 3. take the first element from the queue (work_t)
- * 4. unlock mutex
- * 5. call the thread routine
- *
  */
 void* do_work(void* p);
 
