@@ -9,7 +9,10 @@
 #include "threadpool.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthread.h>
+
+#define EMPTY 0
+#define TRUE 1
+#define FALSE 0
 
 
 /**
@@ -21,10 +24,10 @@ threadpool* create_threadpool(int num_threads_in_pool){
     if (num_threads_in_pool > MAXT_IN_POOL || num_threads_in_pool < 1)
         return NULL;
     threadpool* tp = (threadpool*)malloc(sizeof(threadpool));
-    tp->dont_accept = 0;
-    tp->shutdown = 0;
+    tp->dont_accept = FALSE;
+    tp->shutdown = FALSE;
     tp->num_threads = 0;
-    tp->qsize = 0;
+    tp->qsize = EMPTY;
     tp->qhead = NULL;
     tp->qtail = NULL;
     pthread_mutex_init(&tp->qlock, NULL);
@@ -63,7 +66,34 @@ void dispatch(threadpool* from_me, dispatch_fn dispatch_to_here, void *arg);
  * 5. call the thread routine
  *
  */
-void* do_work(void* p);
+void* do_work(void* p){
+    threadpool* tp = (threadpool*)p;
+    work_t* new_work;
+    
+    while (TRUE) {
+        if (tp->shutdown)
+            break;
+        
+        /*Checking works in queue*/
+        pthread_mutex_lock(&tp->qlock);
+        if (tp->qsize == EMPTY){
+            pthread_cond_wait(&tp->q_not_empty, &tp->qlock);
+            
+            if (tp->shutdown){
+                pthread_mutex_unlock(&tp->qlock);
+                break;
+            }
+        }
+        /*taking new work from queue*/
+       
+        
+        if (tp->dont_accept || tp->qsize == EMPTY)
+            pthread_cond_signal(&tp->q_empty);
+            
+    }
+    
+    return NULL;
+}
 
 
 /**
@@ -72,15 +102,20 @@ void* do_work(void* p);
  * frees all the memory associated with the threadpool.
  */
 void destroy_threadpool(threadpool* destroyme){
-    destroyme->dont_accept = 1; //refusing new works
+    destroyme->dont_accept = TRUE; //refusing new works
     
     /*checking if work queue is empty */
     pthread_mutex_lock(&destroyme->qlock);
-    if (destroyme->qsize != 0)
+    if (destroyme->qsize != EMPTY)
         pthread_cond_wait(&destroyme->q_empty, &destroyme->qlock);
+    destroyme->shutdown = TRUE;
+    pthread_cond_broadcast(&destroyme->q_not_empty);
     pthread_mutex_unlock(&destroyme->qlock);
-    destroyme->shutdown = 1;
     
+    
+    int i;
+    for(i=0; i<destroyme->num_threads; i++)
+        pthread_join(destroyme->threads[i], NULL);
     
     free(destroyme->threads);
     free(destroyme);
