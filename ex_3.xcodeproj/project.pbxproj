@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		5057FA541FE85F42006C328A /* main.c in Sources */ = {isa = PBXBuildFile; fileRef = 5057FA531FE85F42006C328A /* main.c */; };
+		50CC94D11FEBAF1400DBBC2B /* threadpool.c in Sources */ = {isa = PBXBuildFile; fileRef = 50CC94D01FEBAF1400DBBC2B /* threadpool.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -25,6 +26,8 @@
 /* Begin PBXFileReference section */
 		5057FA501FE85F42006C328A /* ex_3 */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = ex_3; sourceTree = BUILT_PRODUCTS_DIR; };
 		5057FA531FE85F42006C328A /* main.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = main.c; sourceTree = "<group>"; };
+		50CC94CF1FEBAF1400DBBC2B /* threadpool.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = threadpool.h; sourceTree = "<group>"; };
+		50CC94D01FEBAF1400DBBC2B /* threadpool.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = threadpool.c; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -58,6 +61,8 @@
 			isa = PBXGroup;
 			children = (
 				5057FA531FE85F42006C328A /* main.c */,
+				50CC94CF1FEBAF1400DBBC2B /* threadpool.h */,
+				50CC94D01FEBAF1400DBBC2B /* threadpool.c */,
 			);
 			path = ex_3;
 			sourceTree = "<group>";
@@ -120,6 +125,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				5057FA541FE85F42006C328A /* main.c in Sources */,
+				50CC94D11FEBAF1400DBBC2B /* threadpool.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
