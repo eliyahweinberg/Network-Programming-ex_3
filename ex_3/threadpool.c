@@ -29,29 +29,29 @@ void db_print(char* msg);
 threadpool* create_threadpool(int num_threads_in_pool){
     if (num_threads_in_pool > MAXT_IN_POOL || num_threads_in_pool < 1)
         return NULL;
-    threadpool* tp = (threadpool*)malloc(sizeof(threadpool));
-    if (!tp)
+    threadpool* pool = (threadpool*)malloc(sizeof(threadpool));
+    if (!pool)
         return NULL;
 
-    tp->dont_accept = FALSE;
-    tp->shutdown = FALSE;
-    tp->num_threads = num_threads_in_pool;
-    tp->qsize = EMPTY;
-    tp->qhead = NULL;
-    tp->qtail = NULL;
-    pthread_mutex_init(&tp->qlock, NULL);
-    pthread_cond_init(&tp->q_empty, NULL);
-    pthread_cond_init(&tp->q_not_empty, NULL);
+    pool->dont_accept = FALSE;
+    pool->shutdown = FALSE;
+    pool->num_threads = num_threads_in_pool;
+    pool->qsize = EMPTY;
+    pool->qhead = NULL;
+    pool->qtail = NULL;
+    pthread_mutex_init(&pool->qlock, NULL);
+    pthread_cond_init(&pool->q_empty, NULL);
+    pthread_cond_init(&pool->q_not_empty, NULL);
 
-    tp->threads = (pthread_t*)malloc(sizeof(pthread_t)*num_threads_in_pool);
-    if (!tp->threads)
+    pool->threads = (pthread_t*)malloc(sizeof(pthread_t)*num_threads_in_pool);
+    if (!pool->threads)
         return NULL;
 
     int i;
     for (i=0; i<num_threads_in_pool; i++)
-        pthread_create(tp->threads+i, NULL, do_work, tp);
+        pthread_create(pool->threads+i, NULL, do_work, pool);
 
-    return tp;
+    return pool;
 }
 
 
@@ -60,11 +60,11 @@ threadpool* create_threadpool(int num_threads_in_pool){
  * when an available thread takes a job from the queue, it will
  * call the function "dispatch_to_here" with argument "arg".
  */
-void dispatch(threadpool* from_me, dispatch_fn dispatch_to_here, void *arg){
-    if (!from_me)
+void dispatch(threadpool* pool, dispatch_fn dispatch_to_here, void *arg){
+    if (!pool)
         return;
 
-    if (from_me->dont_accept == TRUE)
+    if (pool->dont_accept == TRUE)
         return;
 
 
@@ -76,71 +76,62 @@ void dispatch(threadpool* from_me, dispatch_fn dispatch_to_here, void *arg){
     new_work->arg = arg;
     new_work->next = NULL;
     /*locking mutex for adding new work to the working queue*/
-    pthread_mutex_lock(&from_me->qlock);
+    pthread_mutex_lock(&pool->qlock);
 
-    if(from_me->qsize == EMPTY)
-        from_me->qhead = from_me->qtail = new_work;
+    if(pool->qsize == EMPTY)
+        pool->qhead = pool->qtail = new_work;
     else{
-        from_me->qtail->next = new_work;
-        from_me->qtail = new_work;
+        pool->qtail->next = new_work;
+        pool->qtail = new_work;
     }
-    from_me->qsize++;
-    pthread_cond_signal(&from_me->q_not_empty);
-    pthread_mutex_unlock(&from_me->qlock);
+    pool->qsize++;
+    pthread_cond_signal(&pool->q_not_empty);
+    pthread_mutex_unlock(&pool->qlock);
 }
 
 /**
  * The work function of the thread
  */
 void* do_work(void* p){
-    threadpool* tp = (threadpool*)p;
+    threadpool* pool = (threadpool*)p;
     work_t* new_work;
-    db_print("do_work starts routine");
 
     while (TRUE) {
-        pthread_mutex_lock(&tp->qlock);
-        if (tp->shutdown == TRUE){
-            pthread_mutex_unlock(&tp->qlock);
-            db_print("at do_work unlocked mutex and shutdown");
+        pthread_mutex_lock(&pool->qlock);
+        if (pool->shutdown == TRUE){
+            pthread_mutex_unlock(&pool->qlock);
             break;
         }
 
-        /*Checking works in queue*/
+        /*Checking if there is works in queue*/
 
-        while (tp->qsize == EMPTY && tp->dont_accept == FALSE){
-            db_print("at work wainting on q_not empty");
-            pthread_cond_wait(&tp->q_not_empty, &tp->qlock);
-            db_print("at work waked on q_not_empty");
-            if (tp->shutdown == TRUE){
-                db_print("at work waked and shut down");
-                pthread_mutex_unlock(&tp->qlock);
-                break;
+        while (pool->qsize == EMPTY && pool->dont_accept == FALSE){
+            pthread_cond_wait(&pool->q_not_empty, &pool->qlock);
+            if (pool->shutdown == TRUE){
+                pthread_mutex_unlock(&pool->qlock);
+                return NULL;
             }
         }
 
 
-        if (tp->qsize == EMPTY && tp->dont_accept == TRUE){
-            db_print("at work sinal q_empty");
-            pthread_cond_signal(&tp->q_empty);
-            pthread_mutex_unlock(&tp->qlock);
+        if (pool->qsize == EMPTY && pool->dont_accept == TRUE){
+            pthread_cond_signal(&pool->q_empty);
+            pthread_mutex_unlock(&pool->qlock);
             break;
         }
 
-        /*taking new work from queue*/
-        db_print("taking new work");
-        new_work = tp->qhead;
-        if (tp->qsize == 1)
-            tp->qhead = tp->qtail = NULL;
+        /*taking new work from the queue*/
+        new_work = pool->qhead;
+        if (pool->qsize == 1)
+            pool->qhead = pool->qtail = NULL;
         else
-            tp->qhead = new_work->next;
+            pool->qhead = new_work->next;
 
-        tp->qsize--;
+        pool->qsize--;
 
-        db_print("unlocking qlock");
-        pthread_mutex_unlock(&tp->qlock);
+        pthread_mutex_unlock(&pool->qlock);
         new_work->routine(new_work->arg);
         free(new_work);
-
     }
 
     return NULL;
@@ -152,38 +143,33 @@ void* do_work(void* p){
  * all threads in it to commit suicide, and then
  * frees all the memory associated with the threadpool.
  */
-void destroy_threadpool(threadpool* destroyme){
-    if (!destroyme)
+void destroy_threadpool(threadpool* pool){
+    if (!pool)
         return;
-    db_print("destroy started trying to lock");
-    pthread_mutex_lock(&destroyme->qlock);
-    db_print("destory lock locked");
-    destroyme->dont_accept = TRUE; //refusing new works
+    pthread_mutex_lock(&pool->qlock);
+    pool->dont_accept = TRUE; //refusing new works
 
     /*checking if work queue is empty */
 
-    if (destroyme->qsize != EMPTY){
-        db_print("destroy waiting on q_empty");
-        pthread_cond_wait(&destroyme->q_empty, &destroyme->qlock);
+    if (pool->qsize != EMPTY){
+        pthread_cond_wait(&pool->q_empty, &pool->qlock);
     }
-    destroyme->shutdown = TRUE;
-    db_print("shutdown = True");
-    pthread_cond_broadcast(&destroyme->q_not_empty);
-    pthread_mutex_unlock(&destroyme->qlock);
-    db_print("broadcast q_not_empty");
+    pool->shutdown = TRUE;
+    pthread_mutex_unlock(&pool->qlock);
+    pthread_cond_broadcast(&pool->q_not_empty);
 
 
     int i;
-    for(i=0; i<destroyme->num_threads; i++){
-       pthread_join(destroyme->threads[i], NULL);
+    for(i=0; i<pool->num_threads; i++){
+       pthread_join(pool->threads[i], NULL);
     }
 
-    pthread_mutex_destroy(&destroyme->qlock);
-    pthread_cond_destroy(&destroyme->q_empty);
-    pthread_cond_destroy(&destroyme->q_not_empty);
+    pthread_mutex_destroy(&pool->qlock);
+    pthread_cond_destroy(&pool->q_empty);
+    pthread_cond_destroy(&pool->q_not_empty);
 
-    free(destroyme->threads);
-    free(destroyme);
+    free(pool->threads);
+    free(pool);
 }
 
 //----------------------------------------------------------------------------//
@@ -192,15 +178,6 @@ void db_print(char* msg){
     printf("%s\n",msg);
 #endif
 }
-//
-//
-//
-//
-//
-//
-//
-//
-
 
 
 
