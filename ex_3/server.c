@@ -36,18 +36,12 @@
 #define TRUE 1
 #define FALSE 0
 
-typedef struct client_attributes {
-    int cli_sock_fd;
-    struct sockaddr cli_addr;
-    socklen_t clilen;
-}client_attribs;
-
 typedef struct _attributes {
     threadpool* pool;
     int curr_req_num;
     int max_requests_num;
     int port;
-    client_attribs* clients;
+    int* clients;
     char timebuf[TIMEBUF];
 }server_attribs;
 
@@ -74,6 +68,8 @@ int service_client(void* args);
 int main(int argc, const char * argv[]) {
     int sock_fd;
     int newsock_fd;
+    struct sockaddr cli_addr;
+    socklen_t clilen;
     /*checking correct usage command*/
     if (argc != 3) {
         printf(USAGE);
@@ -91,16 +87,14 @@ int main(int argc, const char * argv[]) {
     }
     
     while (attribs->curr_req_num < attribs->max_requests_num) {
-        newsock_fd = accept(sock_fd,
-            (struct sockaddr*)&attribs->clients[attribs->curr_req_num].cli_addr,
-             &attribs->clients[attribs->curr_req_num].clilen);
+        newsock_fd = accept(sock_fd, (struct sockaddr*)&cli_addr, &clilen);
         
         if (newsock_fd < 0){
             perror("Error on accept");
             continue;
         }
         
-        attribs->clients[attribs->curr_req_num].cli_sock_fd = newsock_fd;
+        attribs->clients[attribs->curr_req_num] = newsock_fd;
         
 
         attribs->curr_req_num++;
@@ -163,8 +157,7 @@ server_attribs* init_attribs(int argc, const char * argv[]){
     attribs->max_requests_num = requests_num;
     attribs->port = port;
     memset(attribs->timebuf, '\0', TIMEBUF);
-    attribs->clients = (client_attribs*)calloc(attribs->max_requests_num,
-                                                sizeof(client_attribs));
+    attribs->clients = (int*)calloc(attribs->max_requests_num, sizeof(int));
     if (!attribs->clients){
         free(attribs);
         return NULL;
