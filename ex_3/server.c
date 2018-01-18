@@ -68,6 +68,7 @@ typedef struct _headers_attributes {
 
 typedef struct _request_attributes {
     char** path_args;
+    unsigned char* request;
     char* path;
     int argc;
     int request_lenght;
@@ -89,7 +90,7 @@ void dealloc_resources(server_attribs* attribs);
 
 int service_client(void* args);
 
-int receive_request(int sock_fd, unsigned char** buff, int* req_len);
+int receive_request(int sock_fd, request_attribs* req_attribs);
 
 char* get_response_content(int status);
 
@@ -249,9 +250,9 @@ void dealloc_resources(server_attribs* attribs){
 int service_client(void* args){
     int cli_sock_fd = *(int*)args;
     int status;
-    int req_len;
-    unsigned char* request;
-    status = receive_request(cli_sock_fd, &request, &req_len);
+    request_attribs req_attribs;
+
+    status = receive_request(cli_sock_fd, &req_attribs);
     if (status != CONECTION_CLOSED)
         send_responce(cli_sock_fd, status, request, req_len);
 
@@ -260,14 +261,14 @@ int service_client(void* args){
 }
 
 //----------------------------------------------------------------------------//
-int receive_request(int sock_fd, unsigned char** buff, int* req_len){
+int receive_request(int sock_fd, request_attribs* req_attribs){
     ssize_t rc;
     const int REQUEST_LINE = 4000;
     int offset = 0;
     int r_found = FALSE;
     int n_found = FALSE;
     int i;
-    *req_len = 0;
+    req_attribs->request_lenght = 0;
     unsigned char* request = (unsigned char*)malloc(REQUEST_LINE*sizeof(char));
     if (!request)
         return FAILURE;
@@ -277,7 +278,8 @@ int receive_request(int sock_fd, unsigned char** buff, int* req_len){
         rc = read(sock_fd, request+offset, REQUEST_LINE-offset);
         if (rc < 0){
             free(request);
-            return INTERNAL_ERROR;
+            req_attribs->status = INTERNAL_ERROR;
+            return FAILURE;
         } else if (rc == 0){
             free(request);
             return CONECTION_CLOSED;
@@ -292,31 +294,34 @@ int receive_request(int sock_fd, unsigned char** buff, int* req_len){
                 n_found = TRUE;
             
             if (r_found && n_found){
-                *req_len = i;
+                req_attribs->request_lenght = i;
                 break; //EOF terminator received
             }
         }
         
         /*EOF terminator received or maximal lenght of the line reached*/
-        if (*req_len || offset == REQUEST_LINE)
+        if (req_attribs->request_lenght || offset == REQUEST_LINE)
             break;
     }
     
-    if (!*req_len) {
+    if (!req_attribs->request_lenght) {
         free(request);
-        return BAD_REQUEST;
+        req_attribs->status = BAD_REQUEST;
+        return FAILURE;
     }
-    *buff = (unsigned char*)malloc(((*req_len)+1)*sizeof(char));
-    if (!(*buff)){
+    req_attribs->request = (unsigned char*)
+                        malloc(((req_attribs->request_lenght)+1)*sizeof(char));
+    if (!req_attribs->request){
         free(request);
-        return INTERNAL_ERROR;
+        req_attribs->status = INTERNAL_ERROR;
+        return FAILURE;
     }
     
-    for (i=0; i<*req_len; i++)
-        *buff[i] = request[i];
+    for (i=0; i<req_attribs->request_lenght; i++)
+        req_attribs->request[i] = request[i];
     
-    *buff[*req_len] = '\0';
-
+    req_attribs->request[req_attribs->request_lenght] = '\0';
+    req_attribs->status = SUCCESS;
     free(request);
     return SUCCESS;
 }
