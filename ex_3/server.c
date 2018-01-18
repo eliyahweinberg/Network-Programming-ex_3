@@ -30,7 +30,7 @@
 #define R_CLEN "Content-Length: "
 #define R_LS_MODIFIED "Last-Modified: "
 #define R_CONNECTION "Connection: close"
-#define R_
+
 
 #define TIMEBUF 128
 #define SUCCESS 0
@@ -57,14 +57,22 @@ typedef struct _attributes {
     char timebuf[TIMEBUF];
 }server_attribs;
 
-typedef struct _responce_attributes {
+typedef struct _headers_attributes {
     int response_headrs_len;
     int status;
     int content_len;
     char* last_modified;
     char* path;
     char* content_type;
-}response_attribs;
+}headers_attribs;
+
+typedef struct _request_attributes {
+    char** path_args;
+    char* path;
+    int argc;
+    int request_lenght;
+    int status;
+}request_attribs;
 
 //----------------------------------------------------------------------------//
 //--------------------------FUNCTION DECLARATION------------------------------//
@@ -83,11 +91,11 @@ int service_client(void* args);
 
 int receive_request(int sock_fd, unsigned char** buff, int* req_len);
 
-unsigned char* response_500(int* response_len);
+char* get_response_content(int status);
 
-unsigned char* response_400(int* response_len);
+char* build_resp_head(headers_attribs* resp);
 
-char* build_resp_head(response_attribs* resp);
+int parse_request(request_attribs* request);
 
 int send_responce(int sock_fd, int status, unsigned char* req, int request_len);
 //----------------------------------------------------------------------------//
@@ -132,7 +140,6 @@ int main(int argc, const char * argv[]) {
 //
 //    close(sock_fd);
 //    dealloc_resources(attribs);
-    
    
     return 0;
 }
@@ -316,27 +323,51 @@ int receive_request(int sock_fd, unsigned char** buff, int* req_len){
 
 //----------------------------------------------------------------------------//
 int send_responce(int sock_fd, int status, unsigned char* req, int request_len){
-    unsigned char* response = NULL;
-    int response_len = 0;
+    char* response_header = NULL;
+    unsigned char* content;
+    headers_attribs attr;
+    attr.content_len = 0;
+    attr.content_type = NULL;
+    attr.last_modified = NULL;
+    attr.path = NULL;
+    attr.status = status;
+    if (status == INTERNAL_ERROR || status == BAD_REQUEST) {
+        content = (unsigned char*)get_response_content(status);
+        attr.content_len = (int)strlen((char*)content);
+        response_header = build_resp_head(&attr);
+    }
     
-    if (status == INTERNAL_ERROR)
-        response = response_500(&response_len);
-    else if (status == BAD_REQUEST)
-        response = response_400(&response_len);
     
     
+    free(response_header);
     return SUCCESS;
 }
 
-unsigned char* response_500(int* response_len){
+//----------------------------------------------------------------------------//
+char* get_response_content(int status){
+    if (status == FOUND)
+        return "<HTML><HEAD><TITLE>302 Found</TITLE></HEAD>\n<BODY><H4>302 Found</H4>\nDirectories must end with a slash.\n</BODY></HTML>";
+    
+    else if (status == BAD_REQUEST)
+        return "<HTML><HEAD><TITLE>400 Bad Request</TITLE></HEAD>\n<BODY><H4>400 Bad request</H4>\nBad Request.\n</BODY></HTML>";
+    
+    else if (status == FORBIDDEN)
+        return "<HTML><HEAD><TITLE>403 Forbidden</TITLE></HEAD>\n<BODY><H4>403 Forbidden</H4>\nAccess denied.\n</BODY></HTML>";
+    
+    else if (status == NOT_FOUND)
+        return "<HTML><HEAD><TITLE>404 Not Found</TITLE></HEAD>\n<BODY><H4>404 Not Found</H4>\nFile not found.\n</BODY></HTML>";
+    
+    else if (status == INTERNAL_ERROR)
+        return "<HTML><HEAD><TITLE>500 Internal Server Error</TITLE></HEAD>\n<BODY><H4>500 Internal Server Error</H4>\nSome server side error.\n</BODY></HTML>";
+    
+    else if (status == NOT_SUPPORTED)
+        return "<HTML><HEAD><TITLE>501 Not supported</TITLE></HEAD>\n<BODY><H4>501 Not supported</H4>\nMethod is not supported.\n</BODY></HTML>";
+    
     return NULL;
 }
 
-unsigned char* response_400(int* response_len){
-    return NULL;
-}
-
-char* build_resp_head(response_attribs* resp){
+//----------------------------------------------------------------------------//
+char* build_resp_head(headers_attribs* resp){
     int headers_len = 0;
     int i;
     int temp_c_len = resp->content_len;
@@ -462,3 +493,17 @@ char* build_resp_head(response_attribs* resp){
     return response;
 }
 
+//----------------------------------------------------------------------------//
+int parse_request(request_attribs* request){
+    char* get = "GET";
+    
+    if (strncmp(get, request->path, strlen(get)) != SUCCESS){
+        request->status = NOT_SUPPORTED;
+        return FAILURE;
+    }
+    request->path += strlen(get);
+    *(request->path) = '\0';
+    request->path++;
+    
+    return SUCCESS;
+}
