@@ -375,7 +375,7 @@ int send_responce(int sock_fd, request_attribs* request){
     char* response_header = NULL;
     char* temp_path = NULL;
     unsigned char* content;
-    int i, j;
+    int i=0, j;
     int errsv;
     struct stat statbuf;
     int flag = SUCCESS;
@@ -394,33 +394,52 @@ int send_responce(int sock_fd, request_attribs* request){
     
     if (flag != FAILURE){
         temp_path = (char*)malloc( sizeof(char)*(strlen(request->path)+1) );
-        if (request->argc > 1) {
-            for (i=0; i < request->argc-1; i++) {
-                if (i==0)
-                    strcpy(temp_path, request->path_args[i]);
+       /*Bulding request path that respects permissions */
+        for (i=0; i < request->argc; i++) {
+            if (i==0)
+                strcpy(temp_path, request->path_args[i]);
+            else
+                strcat(temp_path, request->path_args[i]);
+            
+            /////
+            puts(temp_path);
+            /////
+            
+            data_flag = stat(temp_path, &statbuf);
+            if (data_flag == -1) {
+                errsv = errno;
+                if (errsv == ENOENT || errsv == ENOTDIR)
+                    request->status = NOT_FOUND;
                 else
-                    strcat(temp_path, request->path_args[i]);
-                puts(temp_path);
-                data_flag = stat(temp_path, &statbuf);
-                if (data_flag == -1) {
-                    errsv = errno;
-                    if (errsv == ENOENT || errsv == ENOTDIR)
-                        request->status = NOT_FOUND;
-                    else
-                        request->status = INTERNAL_ERROR;
-                    flag = FAILURE;
-                    break;
-                } else if ( !(S_IXUSR & statbuf.st_mode) ||
-                            !(S_IXGRP & statbuf.st_mode) ||
-                            !(S_IXOTH & statbuf.st_mode)){
-                    request->status = FORBIDDEN;
-                    flag = FAILURE;
-                    break;
-                }
-                    
-
+                    request->status = INTERNAL_ERROR;
+                flag = FAILURE;
+                break;
             }
+            /*Checking if there is directory in the end of path and '/' missing*/
+            else if (i == request->argc-1
+                     && flag == NO_SLASH
+                     && S_ISDIR(statbuf.st_mode)){
+                request->status = FOUND;
+                request->path[strlen(request->path)] = '/';
+                request->path[strlen(request->path)+1] = '\0';
+                attr.path = request->path;
+                flag = FAILURE;
+                break;
+            }
+            /*Checking EXE permissions for directories in the path*/
+            else if ((flag != NO_SLASH || i != request->argc-1)
+                     &&
+                     (!(S_IXUSR & statbuf.st_mode) ||
+                      !(S_IXGRP & statbuf.st_mode) ||
+                      !(S_IXOTH & statbuf.st_mode)) ){
+                         request->status = FORBIDDEN;
+                         flag = FAILURE;
+                         break;
+                     }
         }
+            
+            
+            
         
         
         
@@ -633,6 +652,7 @@ int parse_request(request_attribs* request_args){
     *request = '\0';    //cutting GET from the beginning of the request
     request++;
     *(--end) = '\0';    //cutting HTTP from the end of the request
+    
     path_len = (int)strlen(request);
     request_args->path = (char*)malloc(sizeof(char)*(path_len+2));
     strcpy(request_args->path, request);
