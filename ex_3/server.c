@@ -9,13 +9,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
-#include <sys/wait.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 #include <netdb.h>
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
+#include <dirent.h>
 #include "threadpool.h"
 
 #define RFC1123FMT "%a, %d %b %Y %H:%M:%S GMT"
@@ -38,6 +39,7 @@
 #define TRUE 1
 #define FALSE 0
 #define CONECTION_CLOSED 1
+#define NO_SLASH 2
 
 #define OK 200
 #define FOUND 302
@@ -98,25 +100,25 @@ char* build_resp_head(headers_attribs* resp);
 
 int parse_request(request_attribs* request);
 
-int send_responce(int sock_fd, int status, unsigned char* req, int request_len);
+int send_responce(int sock_fd, request_attribs* request);
 //----------------------------------------------------------------------------//
 //------------------------------M A I N---------------------------------------//
 //----------------------------------------------------------------------------//
 int main(int argc, const char * argv[]) {
-//    int sock_fd;
-//    int newsock_fd;
-//    struct sockaddr cli_addr;
-//    socklen_t clilen;
-//    /*checking correct usage command*/
-//    if (argc != 4) {
-//        printf(USAGE);
-//        return FAILURE;
-//    }
-//
-//    server_attribs* attribs = init_attribs(argc, argv);
-//    if (!attribs)
-//        return FAILURE;
-//
+    int sock_fd;
+    int newsock_fd;
+    struct sockaddr cli_addr;
+    socklen_t clilen;
+    /*checking correct usage command*/
+    if (argc != 4) {
+        printf(USAGE);
+        return FAILURE;
+    }
+
+    server_attribs* attribs = init_attribs(argc, argv);
+    if (!attribs)
+        return FAILURE;
+
 //    sock_fd = init_server(attribs->port);
 //    if (sock_fd == FAILURE){
 //        dealloc_resources(attribs);
@@ -130,17 +132,32 @@ int main(int argc, const char * argv[]) {
 //            perror("Error on accept");
 //            continue;
 //        }
-//
-//        attribs->clients[attribs->curr_req_num] = newsock_fd;
-//
-//        service_client(& attribs->clients[attribs->curr_req_num]);
-//
-//        attribs->curr_req_num++;
+
+        attribs->clients[attribs->curr_req_num] = /*newsock_fd*/ 2;
+
+        service_client(&attribs->clients[attribs->curr_req_num]);
+
+        attribs->curr_req_num++;
 //    }
+
+    
+//    struct dirent **namelist;
+//    int n;
 //
-//
+//    n = scandir("./tet/", &namelist, NULL, alphasort);
+//    if (n < 0)
+//        perror("scandir");
+//    else {
+//        while (n--) {
+//            printf("%s\n", namelist[n]->d_name);
+//            free(namelist[n]);
+//        }
+//        free(namelist);
+//    }
+
+
 //    close(sock_fd);
-//    dealloc_resources(attribs);
+    dealloc_resources(attribs);
    
     return 0;
 }
@@ -251,11 +268,20 @@ int service_client(void* args){
     int cli_sock_fd = *(int*)args;
     int status;
     request_attribs req_attribs;
+    req_attribs.path = NULL;
+    req_attribs.path_args = NULL;
+    req_attribs.request = NULL;
 
     status = receive_request(cli_sock_fd, &req_attribs);
     if (status != CONECTION_CLOSED)
-        send_responce(cli_sock_fd, status, request, req_len);
-
+        send_responce(cli_sock_fd, &req_attribs);
+    
+    
+    //////////////////
+    //!Free Memory!//
+    ////////////////
+    
+    
     close(cli_sock_fd);
     return SUCCESS;
 }
@@ -275,26 +301,44 @@ int receive_request(int sock_fd, request_attribs* req_attribs){
     
     memset(request, '\0', REQUEST_LINE);
     while (TRUE) {
-        rc = read(sock_fd, request+offset, REQUEST_LINE-offset);
-        if (rc < 0){
-            free(request);
-            req_attribs->status = INTERNAL_ERROR;
-            return FAILURE;
-        } else if (rc == 0){
-            free(request);
-            return CONECTION_CLOSED;
-        }
-        offset += rc;
+        
+//        rc = read(sock_fd, request+offset, REQUEST_LINE-offset);
+//        if (rc < 0){
+//            free(request);
+//            req_attribs->status = INTERNAL_ERROR;
+//            return FAILURE;
+//        } else if (rc == 0){
+//            free(request);
+//            return CONECTION_CLOSED;
+//        }
+//        offset += rc;
+        
+        
+        
+        
+        //////
+        //////
+        strcpy(request, "GET test/tp HTTP/1.1\r\n");
+        offset = strlen(request);
+        rc = offset;
+        //////
+        /////
+        ////
+        
+        
+        
+        
+        
         /*Checking if EOF terminator received
          *loop running only for new data that received*/
-        for (i = (offset == 0 ? offset : offset-(int)rc); i<rc; i++) {
+        for (i = (offset-(int)rc == 0 ? 0 : offset-(int)rc); i<rc; i++) {
             if (request[i] == '\r')
                 r_found = TRUE;
             else if (request[i] == '\n' && i>0 && request[i-1] == '\r')
                 n_found = TRUE;
             
             if (r_found && n_found){
-                req_attribs->request_lenght = i;
+                req_attribs->request_lenght = i-1;
                 break; //EOF terminator received
             }
         }
@@ -327,24 +371,92 @@ int receive_request(int sock_fd, request_attribs* req_attribs){
 }
 
 //----------------------------------------------------------------------------//
-int send_responce(int sock_fd, int status, unsigned char* req, int request_len){
+int send_responce(int sock_fd, request_attribs* request){
     char* response_header = NULL;
+    char* temp_path = NULL;
     unsigned char* content;
+    int i, j;
+    int errsv;
+    struct stat statbuf;
+    int flag = SUCCESS;
+    int data_flag;
     headers_attribs attr;
     attr.content_len = 0;
     attr.content_type = NULL;
     attr.last_modified = NULL;
     attr.path = NULL;
-    attr.status = status;
-    if (status == INTERNAL_ERROR || status == BAD_REQUEST) {
-        content = (unsigned char*)get_response_content(status);
-        attr.content_len = (int)strlen((char*)content);
-        response_header = build_resp_head(&attr);
+    attr.status = request->status;
+    
+    if (request->status == INTERNAL_ERROR || request->status == BAD_REQUEST)
+        flag = FAILURE;
+    else
+        flag = parse_request(request);
+    
+    if (flag != FAILURE){
+        temp_path = (char*)malloc( sizeof(char)*(strlen(request->path)+1) );
+        if (request->argc > 1) {
+            for (i=0; i < request->argc-1; i++) {
+                if (i==0)
+                    strcpy(temp_path, request->path_args[i]);
+                else
+                    strcat(temp_path, request->path_args[i]);
+                puts(temp_path);
+                data_flag = stat(temp_path, &statbuf);
+                if (data_flag == -1) {
+                    errsv = errno;
+                    if (errsv == ENOENT || errsv == ENOTDIR)
+                        request->status = NOT_FOUND;
+                    else
+                        request->status = INTERNAL_ERROR;
+                    flag = FAILURE;
+                    break;
+                } else if ( !(S_IXUSR & statbuf.st_mode) ||
+                            !(S_IXGRP & statbuf.st_mode) ||
+                            !(S_IXOTH & statbuf.st_mode)){
+                    request->status = FORBIDDEN;
+                    flag = FAILURE;
+                    break;
+                }
+                    
+
+            }
+        }
+        
+        
+        
+        
+       
     }
     
     
     
+    if (flag == FAILURE){
+        content = (unsigned char*)get_response_content(request->status);
+        attr.content_len = (int)strlen((char*)content);
+        attr.status = request->status;
+        response_header = build_resp_head(&attr);
+    }
+    
+    ////
+//    printf("%s%s\n",response_header,content);
+    ////
+    
+    
+    //////////////////
+    //!Free Memory!//
+    ////////////////
+    
+    if (request->path_args) {
+        for (i=0; i < request->argc; i++)
+            free(request->path_args[i]);
+        free(request->path_args);
+    }
+    if (request->path)
+        free(request->path);
+    if (temp_path)
+        free(temp_path);
     free(response_header);
+    free(request->request);
     return SUCCESS;
 }
 
@@ -380,7 +492,7 @@ char* build_resp_head(headers_attribs* resp){
     char* str_cont_len;
     char* phrase = NULL;
     char str_status [4];
-    char* response;
+    char* headers;
     memset(timebuf, '\0', TIMEBUF);
     get_time(timebuf);
     headers_len += strlen(R_HTTP);
@@ -449,41 +561,41 @@ char* build_resp_head(headers_attribs* resp){
     
     resp->response_headrs_len = headers_len;
     /*building response*/
-    response = (char*)malloc(sizeof(char)*(headers_len+1));
+    headers = (char*)malloc(sizeof(char)*(headers_len+1));
     
-    strcpy(response, R_HTTP);
-    strcat(response, str_status);
-    strcat(response, phrase);
-    strcat(response, R_EOL);
-    strcat(response, R_SERVER);
-    strcat(response, R_EOL);
-    strcat(response, R_DATE);
-    strcat(response, timebuf);
-    strcat(response, R_EOL);
+    strcpy(headers, R_HTTP);
+    strcat(headers, str_status);
+    strcat(headers, phrase);
+    strcat(headers, R_EOL);
+    strcat(headers, R_SERVER);
+    strcat(headers, R_EOL);
+    strcat(headers, R_DATE);
+    strcat(headers, timebuf);
+    strcat(headers, R_EOL);
     if (resp->status == FOUND) {
-        strcat(response, R_LOC);
-        strcat(response, resp->path);
-        strcat(response, R_EOL);
+        strcat(headers, R_LOC);
+        strcat(headers, resp->path);
+        strcat(headers, R_EOL);
     }
     if (resp->status != OK){
-        strcat(response, R_DEF_CTYPE);
-        strcat(response, R_EOL);
+        strcat(headers, R_DEF_CTYPE);
+        strcat(headers, R_EOL);
     } else if (resp->content_type){
-        strcat(response, R_CTYPE);
-        strcat(response, resp->content_type);
-        strcat(response, R_EOL);
+        strcat(headers, R_CTYPE);
+        strcat(headers, resp->content_type);
+        strcat(headers, R_EOL);
     }
-    strcat(response, R_CLEN);
-    strcat(response, str_cont_len);
-    strcat(response, R_EOL);
+    strcat(headers, R_CLEN);
+    strcat(headers, str_cont_len);
+    strcat(headers, R_EOL);
     if (resp->status == OK){
-        strcat(response, R_LS_MODIFIED);
-        strcat(response, resp->last_modified);
-        strcat(response, R_EOL);
+        strcat(headers, R_LS_MODIFIED);
+        strcat(headers, resp->last_modified);
+        strcat(headers, R_EOL);
     }
-    strcat(response, R_CONNECTION);
-    strcat(response, R_EOL);
-    strcat(response, R_EOL);
+    strcat(headers, R_CONNECTION);
+    strcat(headers, R_EOL);
+    strcat(headers, R_EOL);
     
 //    if (resp->content_type)
 //        free(resp->content_type);
@@ -495,20 +607,61 @@ char* build_resp_head(headers_attribs* resp){
     free(str_cont_len);
     free(phrase);
     
-    return response;
+    return headers;
 }
 
 //----------------------------------------------------------------------------//
-int parse_request(request_attribs* request){
+int parse_request(request_attribs* request_args){
     char* get = "GET";
+    char* http_1_0 = "HTTP/1.0";
+    char* http_1_1 = "HTTP/1.1";
+    char* request = (char*)request_args->request;
+    char* end = request+strlen(request)-strlen(http_1_0);
+    int counter = 0, i, stat = SUCCESS;
+    int path_len;
+    char* str_ptr, *saveptr, *tmp_ptr;
+    char* delim = "/";
     
-    if (strncmp(get, request->path, strlen(get)) != SUCCESS){
-        request->status = NOT_SUPPORTED;
+    if (strncmp(get, request, strlen(get)) != SUCCESS
+                    || (strcmp(http_1_0, end) != SUCCESS &&
+                        strcmp(http_1_1, end) != SUCCESS) ){
+        request_args->status = NOT_SUPPORTED;
         return FAILURE;
     }
-    request->path += strlen(get);
-    *(request->path) = '\0';
-    request->path++;
     
-    return SUCCESS;
+    request += strlen(get);
+    *request = '\0';    //cutting GET from the beginning of the request
+    request++;
+    *(--end) = '\0';    //cutting HTTP from the end of the request
+    path_len = (int)strlen(request);
+    request_args->path = strdup(request);
+    for (i=0; i<path_len;i++)
+        if (request[i] == '/')
+            counter++;
+    
+    
+    if (counter == 1 && strlen(request) == 1){//path contains only '/'
+        request_args->argc = 1;
+        return SUCCESS;
+    } else if (request[path_len-1] != '/'){//path not ends with '/'
+        stat = NO_SLASH;
+        counter++;
+    }
+    request_args->argc = counter;
+    request_args->path_args = (char**)malloc(sizeof(char*)*counter);
+    str_ptr = request;
+    for (i=0; i<counter; i++, str_ptr = NULL){
+        tmp_ptr = strtok_r(str_ptr, delim, &saveptr);
+        request_args->path_args[i] = (char*)
+                                    malloc(sizeof(char)*(strlen(tmp_ptr)+2));
+        strcpy(request_args->path_args[i], tmp_ptr);
+        if (i == counter-1 && stat == NO_SLASH)
+            request_args->path_args[i][strlen(tmp_ptr)] = '\0';
+        else{
+            request_args->path_args[i][strlen(tmp_ptr)] = '/';
+            request_args->path_args[i][strlen(tmp_ptr)+1] = '\0';
+        }
+    }
+    
+    return stat;
 }
