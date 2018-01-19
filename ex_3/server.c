@@ -634,7 +634,8 @@ int parse_request(request_attribs* request_args){
     request++;
     *(--end) = '\0';    //cutting HTTP from the end of the request
     path_len = (int)strlen(request);
-    request_args->path = strdup(request);
+    request_args->path = (char*)malloc(sizeof(char)*(path_len+2));
+    strcpy(request_args->path, request);
     for (i=0; i<path_len;i++)
         if (request[i] == '/')
             counter++;
